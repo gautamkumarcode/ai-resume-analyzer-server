@@ -1,17 +1,137 @@
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// Lazy initialization of OpenAI client
-let openai: OpenAI | null = null;
+// Lazy initialization of Gemini client
+let gemini: GoogleGenerativeAI | null = null;
 
-const getOpenAIClient = (): OpenAI => {
-	if (!openai) {
-		const apiKey = process.env.OPENAI_API_KEY;
+const getGeminiClient = (): GoogleGenerativeAI => {
+	if (!gemini) {
+		const apiKey = process.env.GEMINI_API_KEY;
 		if (!apiKey) {
-			throw new Error("OpenAI API key is not configured. Please set OPENAI_API_KEY in your .env file.");
+			throw new Error(
+				"Gemini API key is not configured. Please set GEMINI_API_KEY in your .env file.",
+			);
 		}
-		openai = new OpenAI({ apiKey });
+		gemini = new GoogleGenerativeAI(apiKey);
 	}
-	return openai;
+	return gemini;
+};
+
+const sanitizeJson = (value: string): string => {
+	return value
+		.replace(/\u201C|\u201D/g, '"')
+		.replace(/\u2018|\u2019/g, "'")
+		.replace(/,\s*([}\]])/g, "$1");
+};
+
+const extractJsonBlock = (value: string): string | null => {
+	let inString = false;
+	let escape = false;
+	let startIndex = -1;
+	const stack: string[] = [];
+
+	for (let i = 0; i < value.length; i++) {
+		const char = value[i];
+
+		if (escape) {
+			escape = false;
+			continue;
+		}
+
+		if (char === "\\") {
+			escape = true;
+			continue;
+		}
+
+		if (char === '"') {
+			inString = !inString;
+			continue;
+		}
+
+		if (inString) {
+			continue;
+		}
+
+		if (char === "{" || char === "[") {
+			if (startIndex === -1) {
+				startIndex = i;
+			}
+			stack.push(char);
+			continue;
+		}
+
+		if (char === "}" || char === "]") {
+			if (stack.length === 0) {
+				continue;
+			}
+			const last = stack[stack.length - 1];
+			if ((last === "{" && char === "}") || (last === "[" && char === "]")) {
+				stack.pop();
+				if (stack.length === 0 && startIndex !== -1) {
+					return value.slice(startIndex, i + 1);
+				}
+			}
+		}
+	}
+
+	return null;
+};
+
+const parseJsonResponse = <T>(text: string): T => {
+	const trimmed = text.trim();
+
+	const stripCodeFence = (value: string): string => {
+		const match =
+			value.match(/```json\s*([\s\S]*?)```/i) ??
+			value.match(/```\s*([\s\S]*?)```/i);
+		return match ? match[1].trim() : value.trim();
+	};
+
+	const tryParse = (value: string): T | null => {
+		try {
+			return JSON.parse(value) as T;
+		} catch {
+			try {
+				return JSON.parse(sanitizeJson(value)) as T;
+			} catch {
+				return null;
+			}
+		}
+	};
+
+	const direct = tryParse(trimmed);
+	if (direct) {
+		return direct;
+	}
+
+	const withoutFence = stripCodeFence(trimmed);
+	const fenced = tryParse(withoutFence);
+	if (fenced) {
+		return fenced;
+	}
+
+	const firstBrace = withoutFence.indexOf("{");
+	const lastBrace = withoutFence.lastIndexOf("}");
+	if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+		const sliced = withoutFence.slice(firstBrace, lastBrace + 1);
+		const slicedParsed = tryParse(sliced);
+		if (slicedParsed) {
+			return slicedParsed;
+		}
+	}
+
+	const extracted = extractJsonBlock(withoutFence);
+	if (extracted) {
+		const extractedParsed = tryParse(extracted);
+		if (extractedParsed) {
+			return extractedParsed;
+		}
+	}
+
+	console.error(
+		"Failed to parse AI response. Raw text (first 500 chars):",
+		text.substring(0, 500),
+	);
+	throw new Error("Unable to parse JSON from AI response");
 };
 
 export interface ResumeAnalysis {
@@ -71,29 +191,53 @@ Provide the analysis in the following JSON format:
 Return only valid JSON, no additional text.`;
 
 	try {
-		const response = await getOpenAIClient().chat.completions.create({
-			model: "gpt-3.5-turbo",
-			messages: [
-				{
-					role: "system",
-					content:
-						"You are an expert resume analyzer. Analyze resumes and provide structured feedback in JSON format.",
-				},
-				{
-					role: "user",
-					content: prompt,
-				},
-			],
-			temperature: 0.3,
-			max_tokens: 2000,
+		const model = getGeminiClient().getGenerativeModel({
+			model: "gemini-2.5-flash",
+			systemInstruction:
+				"You are an expert resume analyzer. Analyze resumes and provide structured feedback in JSON format.",
 		});
 
-		const content = response.choices[0]?.message?.content;
+		const response = await model.generateContent({
+			contents: [{ role: "user", parts: [{ text: prompt }] }],
+			generationConfig: {
+				temperature: 0.3,
+				maxOutputTokens: 8000,
+				responseMimeType: "application/json",
+			},
+		});
+
+		const candidate = response.response.candidates?.[0];
+		const finishReason = candidate?.finishReason;
+
+		if (finishReason && finishReason !== "STOP") {
+			console.warn(
+				`[Resume Analysis] Response truncated. Finish reason: ${finishReason}`,
+			);
+		}
+
+		const content = response.response.text();
 		if (!content) {
 			throw new Error("No response from AI");
 		}
 
-		return JSON.parse(content);
+		console.log(
+			"[Resume Analysis] Raw AI response (first 500 chars):",
+			content.substring(0, 500),
+		);
+		console.log(
+			"[Resume Analysis] Response length:",
+			content.length,
+			"Finish reason:",
+			finishReason,
+		);
+
+		try {
+			return parseJsonResponse<ResumeAnalysis>(content);
+		} catch (parseError) {
+			console.error("[Resume Analysis] Failed to parse JSON:", parseError);
+			console.error("[Resume Analysis] Full response:", content);
+			throw parseError;
+		}
 	} catch (error) {
 		console.error("AI Analysis Error:", error);
 		// Return default analysis if AI fails
@@ -166,29 +310,53 @@ Provide the analysis in the following JSON format:
 Return only valid JSON, no additional text.`;
 
 	try {
-		const response = await getOpenAIClient().chat.completions.create({
-			model: "gpt-3.5-turbo",
-			messages: [
-				{
-					role: "system",
-					content:
-						"You are an expert recruiter and resume matcher. Analyze how well candidates match job requirements.",
-				},
-				{
-					role: "user",
-					content: prompt,
-				},
-			],
-			temperature: 0.3,
-			max_tokens: 1500,
+		const model = getGeminiClient().getGenerativeModel({
+			model: "gemini-2.5-flash",
+			systemInstruction:
+				"You are an expert recruiter and resume matcher. Analyze how well candidates match job requirements.",
 		});
 
-		const content = response.choices[0]?.message?.content;
+		const response = await model.generateContent({
+			contents: [{ role: "user", parts: [{ text: prompt }] }],
+			generationConfig: {
+				temperature: 0.3,
+				maxOutputTokens: 4000,
+				responseMimeType: "application/json",
+			},
+		});
+
+		const candidate = response.response.candidates?.[0];
+		const finishReason = candidate?.finishReason;
+
+		if (finishReason && finishReason !== "STOP") {
+			console.warn(
+				`[Job Match] Response truncated. Finish reason: ${finishReason}`,
+			);
+		}
+
+		const content = response.response.text();
 		if (!content) {
 			throw new Error("No response from AI");
 		}
 
-		return JSON.parse(content);
+		console.log(
+			"[Job Match] Raw AI response (first 500 chars):",
+			content.substring(0, 500),
+		);
+		console.log(
+			"[Job Match] Response length:",
+			content.length,
+			"Finish reason:",
+			finishReason,
+		);
+
+		try {
+			return parseJsonResponse<JobMatchAnalysis>(content);
+		} catch (parseError) {
+			console.error("[Job Match] Failed to parse JSON:", parseError);
+			console.error("[Job Match] Full response:", content);
+			throw parseError;
+		}
 	} catch (error) {
 		console.error("Job Match Analysis Error:", error);
 		return {

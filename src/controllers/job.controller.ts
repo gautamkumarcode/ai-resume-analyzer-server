@@ -49,9 +49,10 @@ export const getJobs = async (
 	next: NextFunction,
 ): Promise<void> => {
 	try {
-		const userId = req.user!._id;
-
-		const jobs = await Job.find({ user: userId }).sort({ createdAt: -1 });
+		// Public job board - show all jobs to all users
+		const jobs = await Job.find()
+			.sort({ createdAt: -1 })
+			.populate("user", "name email");
 
 		res.json({
 			success: true,
@@ -69,9 +70,9 @@ export const getJob = async (
 ): Promise<void> => {
 	try {
 		const { id } = req.params;
-		const userId = req.user!._id;
 
-		const job = await Job.findOne({ _id: id, user: userId });
+		// Allow viewing any job (public job board)
+		const job = await Job.findById(id).populate("user", "name email");
 		if (!job) {
 			throw new ApiError("Job not found", 404);
 		}
