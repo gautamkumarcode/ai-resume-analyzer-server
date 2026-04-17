@@ -40,6 +40,10 @@ export const protect = async (
 			throw new ApiError("User not found", 401);
 		}
 
+		if (user.active === false) {
+			throw new ApiError("Account is deactivated", 403);
+		}
+
 		req.user = user;
 		next();
 	} catch (error) {
@@ -49,4 +53,29 @@ export const protect = async (
 			next(error);
 		}
 	}
+};
+
+/**
+ * Restrict a route to specific roles.
+ * Must be used AFTER `protect`.
+ *
+ * @example router.post("/", protect, requireRole("recruiter"), createJob)
+ */
+export const requireRole = (...roles: string[]) => {
+	return (req: AuthRequest, res: Response, next: NextFunction): void => {
+		if (!req.user) {
+			next(new ApiError("Not authorized", 401));
+			return;
+		}
+		if (!roles.includes(req.user.role)) {
+			next(
+				new ApiError(
+					`Access denied. This action requires the '${roles.join(" or ")}' role.`,
+					403,
+				),
+			);
+			return;
+		}
+		next();
+	};
 };

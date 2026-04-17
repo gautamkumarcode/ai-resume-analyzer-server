@@ -1,7 +1,7 @@
 import { NextFunction, Response } from "express";
 import { AuthRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
-import { Job, JobMatch, Resume } from "../models";
+import { Application, Job, JobMatch, Resume } from "../models";
 import { analyzeJobMatch } from "../services/ai.service";
 
 export const createJob = async (
@@ -49,14 +49,33 @@ export const getJobs = async (
 	next: NextFunction,
 ): Promise<void> => {
 	try {
-		// Public job board - show all jobs to all users
-		const jobs = await Job.find()
-			.sort({ createdAt: -1 })
-			.populate("user", "name email");
+		const page = Math.max(1, parseInt(req.query.page as string) || 1);
+		const limit = Math.min(
+			100,
+			Math.max(1, parseInt(req.query.limit as string) || 20),
+		);
+		const skip = (page - 1) * limit;
+
+		const [jobs, total] = await Promise.all([
+			Job.find()
+				.sort({ createdAt: -1 })
+				.skip(skip)
+				.limit(limit)
+				.populate("user", "firstName lastName email"),
+			Job.countDocuments(),
+		]);
 
 		res.json({
 			success: true,
-			data: { jobs },
+			data: {
+				jobs,
+				pagination: {
+					total,
+					page,
+					limit,
+					totalPages: Math.ceil(total / limit),
+				},
+			},
 		});
 	} catch (error) {
 		next(error);
@@ -71,8 +90,10 @@ export const getJob = async (
 	try {
 		const { id } = req.params;
 
-		// Allow viewing any job (public job board)
-		const job = await Job.findById(id).populate("user", "name email");
+		const job = await Job.findById(id).populate(
+			"user",
+			"firstName lastName email",
+		);
 		if (!job) {
 			throw new ApiError("Job not found", 404);
 		}
@@ -128,7 +149,8 @@ export const deleteJob = async (
 			throw new ApiError("Job not found", 404);
 		}
 
-		// Delete associated job matches
+		// Delete associated applications and job matches
+		await Application.deleteMany({ jobId: id });
 		await JobMatch.deleteMany({ job: id });
 
 		res.json({
@@ -149,10 +171,10 @@ export const matchResumeToJob = async (
 		const { resumeId, jobId } = req.body;
 		const userId = req.user!._id;
 
-		// Get resume and job
+		// Resume must belong to the user; job can be any job (public board)
 		const [resume, job] = await Promise.all([
 			Resume.findOne({ _id: resumeId, user: userId }),
-			Job.findOne({ _id: jobId, user: userId }),
+			Job.findById(jobId),
 		]);
 
 		if (!resume) {
@@ -186,9 +208,14 @@ export const matchResumeToJob = async (
 			{ new: true, upsert: true },
 		);
 
+		const populated = await jobMatch.populate([
+			{ path: "resume", select: "fileName parsedData.name" },
+			{ path: "job", select: "title company" },
+		]);
+
 		res.json({
 			success: true,
-			data: { jobMatch },
+			data: { jobMatch: populated },
 		});
 	} catch (error) {
 		next(error);
@@ -202,15 +229,34 @@ export const getJobMatches = async (
 ): Promise<void> => {
 	try {
 		const userId = req.user!._id;
+		const page = Math.max(1, parseInt(req.query.page as string) || 1);
+		const limit = Math.min(
+			100,
+			Math.max(1, parseInt(req.query.limit as string) || 20),
+		);
+		const skip = (page - 1) * limit;
 
-		const jobMatches = await JobMatch.find({ user: userId })
-			.populate("resume", "fileName parsedData.name")
-			.populate("job", "title company")
-			.sort({ matchScore: -1 });
+		const [jobMatches, total] = await Promise.all([
+			JobMatch.find({ user: userId })
+				.populate("resume", "fileName parsedData.name")
+				.populate("job", "title company location type")
+				.sort({ matchScore: -1 })
+				.skip(skip)
+				.limit(limit),
+			JobMatch.countDocuments({ user: userId }),
+		]);
 
 		res.json({
 			success: true,
-			data: { jobMatches },
+			data: {
+				jobMatches,
+				pagination: {
+					total,
+					page,
+					limit,
+					totalPages: Math.ceil(total / limit),
+				},
+			},
 		});
 	} catch (error) {
 		next(error);
@@ -237,6 +283,61 @@ export const getJobMatch = async (
 		res.json({
 			success: true,
 			data: { jobMatch },
+		});
+	} catch (error) {
+		next(error);
+	}
+};
+
+export const getRecommendedJobs = async (
+	req: AuthRequest,
+	res: Response,
+	next: NextFunction,
+): Promise<void> => {
+	try {
+		const userId = req.user!._id;
+
+		// Find all resumes for the user
+		const resumes = await Resume.find({ user: userId });
+
+		if (resumes.length === 0) {
+			throw new ApiError("Please upload a resume first", 400);
+		}
+
+		// Select the resume with the highest aiAnalysis.overallScore
+		const bestResume = resumes.reduce((best, current) => {
+			const bestScore = best.aiAnalysis?.overallScore ?? 0;
+			const currentScore = current.aiAnalysis?.overallScore ?? 0;
+			return currentScore > bestScore ? current : best;
+		});
+
+		// Fetch the 50 most recently created jobs
+		const jobs = await Job.find().sort({ createdAt: -1 }).limit(50);
+
+		// Run Promise.all to analyze each job against the best resume
+		const matchResults = await Promise.all(
+			jobs.map(async (job) => {
+				const matchAnalysis = await analyzeJobMatch(
+					bestResume.rawText,
+					job.description,
+					job.requirements,
+					job.skills,
+				);
+				return {
+					...job.toObject(),
+					matchScore: matchAnalysis.matchScore,
+				};
+			}),
+		);
+
+		// Sort by matchScore descending and take top 5
+		const topJobs = matchResults
+			.sort((a, b) => b.matchScore - a.matchScore)
+			.slice(0, 5);
+
+		res.json({
+			success: true,
+			data: { recommendedJobs: topJobs },
 		});
 	} catch (error) {
 		next(error);

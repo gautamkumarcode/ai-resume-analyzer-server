@@ -2,7 +2,7 @@ import { NextFunction, Response } from "express";
 import fs from "fs";
 import { AuthRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
-import { Resume } from "../models";
+import { Application, Resume } from "../models";
 import { analyzeResume } from "../services/ai.service";
 import { parseResume } from "../utils/resumeParser";
 
@@ -170,12 +170,51 @@ export const deleteResume = async (
 			throw new ApiError("Resume not found", 404);
 		}
 
+		// Nullify resumeId on associated applications
+		await Application.updateMany(
+			{ resumeId: id },
+			{ $set: { resumeId: null } },
+		);
+
 		// Delete file
 		fs.unlink(resume.filePath, () => {});
 
 		res.json({
 			success: true,
 			message: "Resume deleted successfully",
+		});
+	} catch (error) {
+		next(error);
+	}
+};
+
+export const improveResumeController = async (
+	req: AuthRequest,
+	res: Response,
+	next: NextFunction,
+): Promise<void> => {
+	try {
+		const { id } = req.params;
+		const { jobId } = req.body;
+		const userId = req.user!._id;
+
+		const resume = await Resume.findOne({ _id: id, user: userId });
+		if (!resume) {
+			throw new ApiError("Resume not found", 404);
+		}
+
+		const { Job } = await import("../models");
+		const job = await Job.findById(jobId);
+		if (!job) {
+			throw new ApiError("Job not found", 404);
+		}
+
+		const { improveResume } = await import("../services/ai.service");
+		const result = await improveResume(resume.rawText, job.description);
+
+		res.json({
+			success: true,
+			data: { improvement: result },
 		});
 	} catch (error) {
 		next(error);

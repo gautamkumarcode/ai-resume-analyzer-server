@@ -1,7 +1,17 @@
 import { NextFunction, Request, Response } from "express";
+import { AuthRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
 import { User } from "../models";
 import { generateToken } from "../utils/jwt";
+
+const serializeUser = (user: InstanceType<typeof User>) => ({
+	id: user._id,
+	email: user.email,
+	firstName: user.firstName,
+	lastName: user.lastName,
+	role: user.role,
+	createdAt: user.createdAt,
+});
 
 export const register = async (
 	req: Request,
@@ -9,36 +19,26 @@ export const register = async (
 	next: NextFunction,
 ): Promise<void> => {
 	try {
-		const { email, password, firstName, lastName } = req.body;
+		const { email, password, firstName, lastName, role } = req.body;
 
-		// Check if user exists
 		const existingUser = await User.findOne({ email });
 		if (existingUser) {
 			throw new ApiError("User already exists with this email", 400);
 		}
 
-		// Create user
 		const user = await User.create({
 			email,
 			password,
 			firstName,
 			lastName,
+			role: role === "recruiter" ? "recruiter" : "candidate",
 		});
 
-		// Generate token
 		const token = generateToken(user);
 
 		res.status(201).json({
 			success: true,
-			data: {
-				user: {
-					id: user._id,
-					email: user.email,
-					firstName: user.firstName,
-					lastName: user.lastName,
-				},
-				token,
-			},
+			data: { user: serializeUser(user), token },
 		});
 	} catch (error) {
 		next(error);
@@ -53,32 +53,21 @@ export const login = async (
 	try {
 		const { email, password } = req.body;
 
-		// Find user with password
 		const user = await User.findOne({ email }).select("+password");
 		if (!user) {
 			throw new ApiError("Invalid credentials", 401);
 		}
 
-		// Check password
 		const isMatch = await user.comparePassword(password);
 		if (!isMatch) {
 			throw new ApiError("Invalid credentials", 401);
 		}
 
-		// Generate token
 		const token = generateToken(user);
 
 		res.json({
 			success: true,
-			data: {
-				user: {
-					id: user._id,
-					email: user.email,
-					firstName: user.firstName,
-					lastName: user.lastName,
-				},
-				token,
-			},
+			data: { user: serializeUser(user), token },
 		});
 	} catch (error) {
 		next(error);
@@ -86,24 +75,14 @@ export const login = async (
 };
 
 export const getProfile = async (
-	req: Request,
+	req: AuthRequest,
 	res: Response,
 	next: NextFunction,
 ): Promise<void> => {
 	try {
-		const user = (req as any).user;
-
 		res.json({
 			success: true,
-			data: {
-				user: {
-					id: user._id,
-					email: user.email,
-					firstName: user.firstName,
-					lastName: user.lastName,
-					createdAt: user.createdAt,
-				},
-			},
+			data: { user: serializeUser(req.user as any) },
 		});
 	} catch (error) {
 		next(error);
@@ -111,12 +90,12 @@ export const getProfile = async (
 };
 
 export const updateProfile = async (
-	req: Request,
+	req: AuthRequest,
 	res: Response,
 	next: NextFunction,
 ): Promise<void> => {
 	try {
-		const userId = (req as any).user._id;
+		const userId = req.user!._id;
 		const { firstName, lastName } = req.body;
 
 		const user = await User.findByIdAndUpdate(
@@ -131,14 +110,7 @@ export const updateProfile = async (
 
 		res.json({
 			success: true,
-			data: {
-				user: {
-					id: user._id,
-					email: user.email,
-					firstName: user.firstName,
-					lastName: user.lastName,
-				},
-			},
+			data: { user: serializeUser(user) },
 		});
 	} catch (error) {
 		next(error);

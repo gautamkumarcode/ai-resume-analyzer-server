@@ -1,3 +1,8 @@
+export {
+	Application,
+	ApplicationStatus,
+	IApplication,
+} from "./Application.model";
 export { IJob, Job } from "./Job.model";
 export { IJobMatch, JobMatch } from "./JobMatch.model";
 export {

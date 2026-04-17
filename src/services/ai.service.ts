@@ -375,3 +375,62 @@ Return only valid JSON, no additional text.`;
 		};
 	}
 };
+
+export interface ImprovementResult {
+	improvedBulletPoints: string[];
+	missingKeywords: string[];
+	formattingSuggestions: string[];
+}
+
+export const improveResume = async (
+	resumeText: string,
+	jobDescription: string,
+): Promise<ImprovementResult> => {
+	const prompt = `You are an expert resume coach. Analyze this resume against the job description and provide specific improvements.
+
+Resume:
+${resumeText}
+
+Job Description:
+${jobDescription}
+
+Return a JSON object with exactly these fields:
+{
+  "improvedBulletPoints": ["<rewritten bullet point with metrics and action verbs>", ...],
+  "missingKeywords": ["<keyword from job description missing in resume>", ...],
+  "formattingSuggestions": ["<structural or presentation improvement>", ...]
+}
+
+Return only valid JSON, no additional text.`;
+
+	try {
+		const model = getGeminiClient().getGenerativeModel({
+			model: "gemini-2.5-flash",
+			systemInstruction:
+				"You are an expert resume coach. Provide specific, actionable improvements.",
+		});
+
+		const response = await model.generateContent({
+			contents: [{ role: "user", parts: [{ text: prompt }] }],
+			generationConfig: {
+				temperature: 0.4,
+				maxOutputTokens: 4000,
+				responseMimeType: "application/json",
+			},
+		});
+
+		const content = response.response.text();
+		if (!content) throw new Error("No response from AI");
+
+		return parseJsonResponse<ImprovementResult>(content);
+	} catch (error) {
+		console.error("Resume Improvement Error:", error);
+		return {
+			improvedBulletPoints: [],
+			missingKeywords: [],
+			formattingSuggestions: [
+				"Unable to generate suggestions at this time. Please try again.",
+			],
+		};
+	}
+};

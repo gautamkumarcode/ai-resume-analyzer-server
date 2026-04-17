@@ -4,20 +4,27 @@ import {
 	deleteResume,
 	getResume,
 	getResumes,
+	improveResumeController,
 	uploadResume,
 } from "../controllers/resume.controller";
-import { protect } from "../middleware/auth";
+import { protect, requireRole } from "../middleware/auth";
 import { upload } from "../middleware/upload";
 
 const router = Router();
 
-// All routes are protected
 router.use(protect);
 
-router.post("/upload", upload.single("resume"), uploadResume);
-router.post("/:id/analyze", analyzeResumeController);
-router.get("/", getResumes);
-router.get("/:id", getResume);
-router.delete("/:id", deleteResume);
+// Candidates only — upload, analyze, manage their own resumes
+router.post(
+	"/upload",
+	requireRole("candidate"),
+	upload.single("resume"),
+	uploadResume,
+);
+router.post("/:id/analyze", requireRole("candidate"), analyzeResumeController);
+router.post("/:id/improve", requireRole("candidate"), improveResumeController);
+router.get("/", requireRole("candidate"), getResumes);
+router.get("/:id", requireRole("candidate"), getResume);
+router.delete("/:id", requireRole("candidate"), deleteResume);
 
 export default router;
