@@ -1,10 +1,13 @@
 import { NextFunction, Response } from "express";
-import fs from "fs";
 import { AuthRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
 import { Application, Resume } from "../models";
 import { analyzeResume } from "../services/ai.service";
-import { parseResume } from "../utils/resumeParser";
+import {
+	deleteFromCloudinary,
+	uploadToCloudinary,
+} from "../services/storage.service";
+import { parseResumeFromBuffer } from "../utils/resumeParser";
 
 export const uploadResume = async (
 	req: AuthRequest,
@@ -16,10 +19,20 @@ export const uploadResume = async (
 			throw new ApiError("Please upload a resume file", 400);
 		}
 
-		const userId = req.user!._id;
+		const userId = req.user!._id.toString();
 
-		// Parse resume text
-		const rawText = await parseResume(req.file.path, req.file.mimetype);
+		// Upload to Cloudinary
+		const uploadResult = await uploadToCloudinary(
+			req.file.buffer,
+			req.file.originalname,
+			userId,
+		);
+
+		// Parse resume text from buffer
+		const rawText = await parseResumeFromBuffer(
+			req.file.buffer,
+			req.file.mimetype,
+		);
 
 		// Analyze with AI on upload
 		const analysis = await analyzeResume(rawText);
@@ -28,7 +41,7 @@ export const uploadResume = async (
 		const resume = await Resume.create({
 			user: userId,
 			fileName: req.file.originalname,
-			filePath: req.file.path,
+			filePath: uploadResult.public_id, // Store Cloudinary public_id
 			fileType: req.file.mimetype,
 			rawText,
 			aiAnalysis: {
@@ -58,10 +71,6 @@ export const uploadResume = async (
 			data: { resume },
 		});
 	} catch (error) {
-		// Clean up uploaded file on error
-		if (req.file) {
-			fs.unlink(req.file.path, () => {});
-		}
 		next(error);
 	}
 };
@@ -176,8 +185,13 @@ export const deleteResume = async (
 			{ $set: { resumeId: null } },
 		);
 
-		// Delete file
-		fs.unlink(resume.filePath, () => {});
+		// Delete file from Cloudinary
+		try {
+			await deleteFromCloudinary(resume.filePath);
+		} catch (error) {
+			console.error("Failed to delete file from Cloudinary:", error);
+			// Continue even if Cloudinary deletion fails
+		}
 
 		res.json({
 			success: true,

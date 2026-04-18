@@ -1,17 +1,19 @@
 {
-	"name": "ai-resume-analyzer-backend",
+	"name": "nextrole-backend",
 	"version": "1.0.0",
-	"description": "AI Resume Analyzer & Job Match Platform - Backend API",
+	"description": "NextRole - AI Resume Analyzer & Job Match Platform - Backend API",
 	"main": "dist/index.js",
 	"scripts": {
 		"dev": "ts-node-dev --respawn --transpile-only src/index.ts",
 		"build": "tsc",
 		"start": "node dist/index.js",
-		"lint": "eslint src/**/*.ts"
+		"lint": "eslint src/**/*.ts",
+		"seed:jobs": "ts-node src/scripts/seedJobs.ts"
 	},
 	"dependencies": {
 		"@google/generative-ai": "^0.24.1",
 		"bcryptjs": "^2.4.3",
+		"cloudinary": "^1.41.0",
 		"cors": "^2.8.5",
 		"dotenv": "^16.3.1",
 		"express": "^4.18.2",

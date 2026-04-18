@@ -49,7 +49,7 @@ app.use("/api/admin", adminRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
-	res.json({ status: "ok", message: "AI Resume Analyzer API is running" });
+	res.json({ status: "ok", message: "NextRole API is running" });
 });
 
 // Error handling middleware

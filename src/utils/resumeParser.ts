@@ -30,6 +30,26 @@ export const parseResume = async (
 	return text.trim();
 };
 
+export const parseResumeFromBuffer = async (
+	buffer: Buffer,
+	mimeType: string,
+): Promise<string> => {
+	let text = "";
+
+	if (mimeType === "application/pdf") {
+		const pdfData = await pdf(buffer);
+		text = pdfData.text;
+	} else if (
+		mimeType ===
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	) {
+		const result = await mammoth.extractRawText({ buffer });
+		text = result.value;
+	}
+
+	return text.trim();
+};
+
 export const extractContactInfo = (
 	text: string,
 ): { email?: string; phone?: string } => {

@@ -1,18 +1,9 @@
 import { Request } from "express";
 import multer from "multer";
-import path from "path";
 import { ApiError } from "./errorHandler";
 
-// Configure storage
-const storage = multer.diskStorage({
-	destination: (req: Request, file: Express.Multer.File, cb) => {
-		cb(null, "uploads/");
-	},
-	filename: (req: Request, file: Express.Multer.File, cb) => {
-		const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-		cb(null, `resume-${uniqueSuffix}${path.extname(file.originalname)}`);
-	},
-});
+// Use memory storage for S3 upload
+const storage = multer.memoryStorage();
 
 // File filter
 const fileFilter = (

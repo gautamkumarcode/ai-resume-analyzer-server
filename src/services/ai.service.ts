@@ -164,29 +164,71 @@ export interface ResumeAnalysis {
 export const analyzeResume = async (
 	resumeText: string,
 ): Promise<ResumeAnalysis> => {
-	const prompt = `Analyze the following resume and provide a structured analysis in JSON format.
+	const prompt = `You are an expert resume analyst and career coach. Analyze this resume thoroughly and provide detailed, actionable feedback.
 
 Resume:
 ${resumeText}
 
-Provide the analysis in the following JSON format:
+Provide a comprehensive analysis in the following JSON format:
 {
-  "overallScore": <number from 0-100>,
-  "strengths": ["<strength1>", "<strength2>", ...],
-  "improvements": ["<improvement1>", "<improvement2>", ...],
-  "keywords": ["<keyword1>", "<keyword2>", ...],
-  "summary": "<brief summary of the candidate>",
+  "overallScore": <number from 0-100 based on: formatting (20%), content quality (30%), keyword optimization (20%), experience presentation (30%)>,
+  "strengths": [
+    "<specific strength with example from resume>",
+    "<quantifiable achievement highlighted>",
+    "<strong skill or qualification>",
+    "Include 4-6 specific strengths"
+  ],
+  "improvements": [
+    "<specific section to improve with exact recommendation>",
+    "<missing element with suggestion on how to add it>",
+    "<formatting issue with fix>",
+    "<weak bullet point with stronger alternative>",
+    "Include 5-8 actionable improvements with specific examples"
+  ],
+  "keywords": [
+    "<industry-relevant keyword found or missing>",
+    "Include 10-15 important keywords for ATS optimization"
+  ],
+  "summary": "<2-3 sentence professional summary highlighting key qualifications, years of experience, and standout achievements>",
   "parsedData": {
-    "name": "<candidate name>",
+    "name": "<full candidate name>",
     "email": "<email if found>",
     "phone": "<phone if found>",
-    "location": "<location if found>",
-    "summary": "<professional summary if found>",
-    "skills": [{"name": "<skill>", "level": "<beginner|intermediate|advanced|expert>"}],
-    "experience": [{"title": "<job title>", "company": "<company>", "location": "<location>", "description": "<description>"}],
-    "education": [{"degree": "<degree>", "institution": "<institution>", "location": "<location>"}]
+    "location": "<city, state/country if found>",
+    "summary": "<professional summary from resume if present>",
+    "skills": [
+      {"name": "<technical or soft skill>", "level": "<beginner|intermediate|advanced|expert based on context>"}
+    ],
+    "experience": [
+      {
+        "title": "<exact job title>",
+        "company": "<company name>",
+        "location": "<work location>",
+        "description": "<key responsibilities and achievements>"
+      }
+    ],
+    "education": [
+      {
+        "degree": "<degree type and major>",
+        "institution": "<university/college name>",
+        "location": "<institution location>"
+      }
+    ]
   }
 }
+
+SCORING CRITERIA:
+- 90-100: Exceptional resume with strong achievements, perfect formatting, ATS-optimized
+- 80-89: Strong resume with good content, minor improvements needed
+- 70-79: Good resume but needs better quantification and keyword optimization
+- 60-69: Average resume, needs significant improvements in content and structure
+- Below 60: Weak resume requiring major revisions
+
+IMPROVEMENT GUIDELINES:
+- Be specific: Instead of "improve formatting", say "Add consistent bullet points to all experience entries"
+- Provide examples: "Change 'Responsible for sales' to 'Increased sales by 35% through targeted marketing campaigns'"
+- Focus on impact: Highlight missing metrics, weak action verbs, and vague descriptions
+- ATS optimization: Identify missing industry keywords and suggest where to add them
 
 Return only valid JSON, no additional text.`;
 
@@ -201,7 +243,7 @@ Return only valid JSON, no additional text.`;
 			contents: [{ role: "user", parts: [{ text: prompt }] }],
 			generationConfig: {
 				temperature: 0.3,
-				maxOutputTokens: 8000,
+				maxOutputTokens: 12000,
 				responseMimeType: "application/json",
 			},
 		});
@@ -277,7 +319,7 @@ export const analyzeJobMatch = async (
 	jobRequirements: string[],
 	jobSkills: string[],
 ): Promise<JobMatchAnalysis> => {
-	const prompt = `Analyze how well this resume matches the job description and requirements.
+	const prompt = `You are an expert recruiter and ATS system. Analyze how well this candidate's resume matches the job posting and provide detailed, actionable feedback.
 
 Resume:
 ${resumeText}
@@ -291,21 +333,55 @@ ${jobRequirements.join("\n")}
 Required Skills:
 ${jobSkills.join(", ")}
 
-Provide the analysis in the following JSON format:
+Provide a comprehensive match analysis in the following JSON format:
 {
-  "matchScore": <number from 0-100>,
+  "matchScore": <overall match score 0-100 based on: skills match (40%), experience match (35%), education/qualifications (15%), cultural fit indicators (10%)>,
   "skillsMatch": {
-    "matched": ["<skill1>", "<skill2>"],
-    "missing": ["<skill1>", "<skill2>"],
-    "percentage": <number from 0-100>
+    "matched": [
+      "<exact skill from job requirements found in resume>",
+      "List ALL matched skills with exact names"
+    ],
+    "missing": [
+      "<required skill not found in resume>",
+      "List ALL missing required skills"
+    ],
+    "percentage": <percentage of required skills found in resume>
   },
   "experienceMatch": {
-    "score": <number from 0-100>,
-    "feedback": "<feedback about experience match>"
+    "score": <0-100 based on years of experience, relevant roles, and industry match>,
+    "feedback": "<detailed 3-4 sentence analysis covering: years of experience vs requirement, relevance of past roles, industry experience, leadership/seniority level match, specific gaps or strengths>"
   },
-  "recommendations": ["<recommendation1>", "<recommendation2>"],
-  "analysis": "<detailed analysis of the match>"
+  "recommendations": [
+    "<specific action to improve match - e.g., 'Add Python certification to skills section'>",
+    "<exact keyword to add - e.g., 'Include 'Agile methodology' in project descriptions'>",
+    "<experience gap to address - e.g., 'Highlight any cloud migration projects to match AWS requirement'>",
+    "<quantification suggestion - e.g., 'Add metrics to team leadership experience (e.g., team size, project budget)'>",
+    "<formatting improvement - e.g., 'Move React.js from 'Other Skills' to 'Core Technical Skills' for better visibility'>",
+    "Provide 5-8 specific, actionable recommendations prioritized by impact"
+  ],
+  "analysis": "<comprehensive 4-6 sentence analysis covering:
+    1. Overall fit assessment and key strengths
+    2. Critical gaps and how they impact candidacy
+    3. Specific areas where candidate exceeds requirements
+    4. Concrete steps to improve match score
+    5. Likelihood of passing ATS screening
+    6. Recommendation on whether to apply (strong match/apply with improvements/not recommended)>"
 }
+
+MATCHING CRITERIA:
+- 85-100: Excellent match - candidate meets or exceeds all requirements
+- 70-84: Strong match - candidate meets most requirements with minor gaps
+- 55-69: Moderate match - candidate has relevant experience but missing key skills
+- 40-54: Weak match - significant gaps in skills or experience
+- Below 40: Poor match - candidate does not meet minimum requirements
+
+ANALYSIS GUIDELINES:
+- Be specific about which requirements are met and which are missing
+- Quantify gaps (e.g., "requires 5 years, candidate has 2 years")
+- Identify transferable skills that could compensate for missing requirements
+- Suggest exact keywords and phrases to add for ATS optimization
+- Provide realistic assessment of interview chances
+- Focus on actionable improvements, not just problems
 
 Return only valid JSON, no additional text.`;
 
@@ -320,7 +396,7 @@ Return only valid JSON, no additional text.`;
 			contents: [{ role: "user", parts: [{ text: prompt }] }],
 			generationConfig: {
 				temperature: 0.3,
-				maxOutputTokens: 4000,
+				maxOutputTokens: 8000,
 				responseMimeType: "application/json",
 			},
 		});
@@ -386,7 +462,7 @@ export const improveResume = async (
 	resumeText: string,
 	jobDescription: string,
 ): Promise<ImprovementResult> => {
-	const prompt = `You are an expert resume coach. Analyze this resume against the job description and provide specific improvements.
+	const prompt = `You are an expert resume coach and ATS optimization specialist. Analyze this resume against the job description and provide specific, actionable improvements to increase the match score and pass ATS screening.
 
 Resume:
 ${resumeText}
@@ -396,10 +472,43 @@ ${jobDescription}
 
 Return a JSON object with exactly these fields:
 {
-  "improvedBulletPoints": ["<rewritten bullet point with metrics and action verbs>", ...],
-  "missingKeywords": ["<keyword from job description missing in resume>", ...],
-  "formattingSuggestions": ["<structural or presentation improvement>", ...]
+  "improvedBulletPoints": [
+    "<rewrite weak bullet point with: strong action verb + specific task + quantifiable result + relevant keyword>",
+    "Example: Change 'Worked on team projects' to 'Led cross-functional team of 5 developers to deliver React-based dashboard, reducing load time by 40%'",
+    "Provide 6-10 improved bullet points targeting the weakest sections"
+  ],
+  "missingKeywords": [
+    "<critical keyword from job description> - Add to: <specific section, e.g., 'Skills section' or 'Project X description'>",
+    "<technical term from requirements> - Suggestion: <how to naturally incorporate it>",
+    "<industry buzzword> - Context: <where it appears in job posting and where to add in resume>",
+    "Identify 8-12 missing keywords with specific placement suggestions"
+  ],
+  "formattingSuggestions": [
+    "<structural improvement with specific action - e.g., 'Add a 'Technical Skills' section before Experience to highlight React, Node.js, AWS'>",
+    "<content organization - e.g., 'Reorder experience entries to put most relevant role (Frontend Developer) first'>",
+    "<quantification - e.g., 'Add metrics to all experience bullets: team size, project scope, performance improvements, cost savings'>",
+    "<ATS optimization - e.g., 'Replace skill rating bars with plain text list - ATS cannot parse graphics'>",
+    "<keyword density - e.g., 'Mention 'JavaScript' 3-4 times across different sections for better ATS ranking'>",
+    "<section additions - e.g., 'Add Certifications section to highlight AWS Solutions Architect certification mentioned in requirements'>",
+    "Provide 6-10 specific formatting and structural improvements prioritized by impact"
+  ]
 }
+
+IMPROVEMENT PRIORITIES:
+1. ATS Optimization: Ensure resume passes automated screening
+2. Keyword Matching: Include all critical terms from job description
+3. Quantification: Add metrics and numbers to demonstrate impact
+4. Action Verbs: Use strong, specific verbs (Led, Architected, Optimized vs Worked on, Helped with)
+5. Relevance: Highlight most relevant experience and skills prominently
+6. Clarity: Make achievements and responsibilities crystal clear
+
+GUIDELINES:
+- Every suggestion must be specific and actionable
+- Provide exact text replacements, not vague advice
+- Focus on changes that directly improve job match
+- Prioritize high-impact improvements first
+- Include both content and formatting recommendations
+- Ensure suggestions are realistic and honest (no fabrication)
 
 Return only valid JSON, no additional text.`;
 
@@ -414,7 +523,7 @@ Return only valid JSON, no additional text.`;
 			contents: [{ role: "user", parts: [{ text: prompt }] }],
 			generationConfig: {
 				temperature: 0.4,
-				maxOutputTokens: 4000,
+				maxOutputTokens: 8000,
 				responseMimeType: "application/json",
 			},
 		});
