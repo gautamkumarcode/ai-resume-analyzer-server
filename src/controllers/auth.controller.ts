@@ -10,6 +10,15 @@ const serializeUser = (user: InstanceType<typeof User>) => ({
 	firstName: user.firstName,
 	lastName: user.lastName,
 	role: user.role,
+	phone: user.phone,
+	location: user.location,
+	title: user.title,
+	company: user.company,
+	summary: user.summary,
+	experience: user.experience,
+	skills: user.skills,
+	linkedin: user.linkedin,
+	website: user.website,
 	createdAt: user.createdAt,
 });
 
@@ -96,13 +105,53 @@ export const updateProfile = async (
 ): Promise<void> => {
 	try {
 		const userId = req.user!._id;
-		const { firstName, lastName } = req.body;
+		const {
+			firstName,
+			lastName,
+			phone,
+			location,
+			title,
+			company,
+			summary,
+			experience,
+			skills,
+			linkedin,
+			website,
+		} = req.body;
 
-		const user = await User.findByIdAndUpdate(
-			userId,
-			{ firstName, lastName },
-			{ new: true, runValidators: true },
-		);
+		// Convert skills string to array if provided
+		const skillsArray = skills
+			? skills
+					.split(",")
+					.map((s: string) => s.trim())
+					.filter(Boolean)
+			: undefined;
+
+		// Helper function to handle empty strings
+		const processField = (value: any) => {
+			if (value === undefined) return undefined;
+			if (typeof value === "string" && value.trim() === "") return null;
+			return value;
+		};
+
+		const updateData: any = {};
+		if (firstName !== undefined) updateData.firstName = firstName;
+		if (lastName !== undefined) updateData.lastName = lastName;
+		if (phone !== undefined) updateData.phone = processField(phone);
+		if (location !== undefined) updateData.location = processField(location);
+		if (title !== undefined) updateData.title = processField(title);
+		if (company !== undefined) updateData.company = processField(company);
+		if (summary !== undefined) updateData.summary = processField(summary);
+		if (experience !== undefined)
+			updateData.experience = processField(experience);
+		if (skillsArray !== undefined) updateData.skills = skillsArray;
+		if (linkedin !== undefined) updateData.linkedin = processField(linkedin);
+		if (website !== undefined) updateData.website = processField(website);
+
+		const user = await User.findByIdAndUpdate(userId, updateData, {
+			new: true,
+			runValidators: true,
+		});
 
 		if (!user) {
 			throw new ApiError("User not found", 404);

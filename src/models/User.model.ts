@@ -11,6 +11,16 @@ export interface IUser extends Document {
 	lastName: string;
 	role: UserRole;
 	active: boolean;
+	// Extended profile fields
+	phone?: string;
+	location?: string;
+	title?: string;
+	company?: string;
+	summary?: string;
+	experience?: string;
+	skills?: string[];
+	linkedin?: string;
+	website?: string;
 	createdAt: Date;
 	updatedAt: Date;
 	comparePassword(candidatePassword: string): Promise<boolean>;
@@ -50,6 +60,45 @@ const userSchema = new Schema<IUser>(
 		active: {
 			type: Boolean,
 			default: true,
+		},
+		// Extended profile fields
+		phone: {
+			type: String,
+			trim: true,
+		},
+		location: {
+			type: String,
+			trim: true,
+		},
+		title: {
+			type: String,
+			trim: true,
+		},
+		company: {
+			type: String,
+			trim: true,
+		},
+		summary: {
+			type: String,
+			trim: true,
+		},
+		experience: {
+			type: String,
+			trim: true,
+		},
+		skills: [
+			{
+				type: String,
+				trim: true,
+			},
+		],
+		linkedin: {
+			type: String,
+			trim: true,
+		},
+		website: {
+			type: String,
+			trim: true,
 		},
 	},
 	{

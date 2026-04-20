@@ -48,6 +48,37 @@ const updateProfileValidation = [
 		.trim()
 		.notEmpty()
 		.withMessage("Last name cannot be empty"),
+	body("phone").optional().trim(),
+	body("location").optional().trim(),
+	body("title").optional().trim(),
+	body("company").optional().trim(),
+	body("summary").optional().trim(),
+	body("experience").optional().trim(),
+	body("skills").optional().trim(),
+	body("linkedin")
+		.optional()
+		.trim()
+		.custom((value) => {
+			if (!value || value === "") return true; // Allow empty values
+			if (!value.match(/^https?:\/\/.+/)) {
+				throw new Error(
+					"LinkedIn must be a valid URL starting with http:// or https://",
+				);
+			}
+			return true;
+		}),
+	body("website")
+		.optional()
+		.trim()
+		.custom((value) => {
+			if (!value || value === "") return true; // Allow empty values
+			if (!value.match(/^https?:\/\/.+/)) {
+				throw new Error(
+					"Website must be a valid URL starting with http:// or https://",
+				);
+			}
+			return true;
+		}),
 ];
 
 // Routes
