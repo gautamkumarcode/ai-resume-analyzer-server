@@ -1,11 +1,19 @@
 import { v2 as cloudinary } from "cloudinary";
 
-// Configure Cloudinary
-cloudinary.config({
-	cloud_name: process.env.CLOUDINARY_CLOUD_NAME!,
-	api_key: process.env.CLOUDINARY_API_KEY!,
-	api_secret: process.env.CLOUDINARY_API_SECRET!,
-});
+// Lazy config — called before first use so env vars are guaranteed to be loaded
+const configureCloudinary = () => {
+	const cloud_name = process.env.CLOUDINARY_CLOUD_NAME;
+	const api_key = process.env.CLOUDINARY_API_KEY;
+	const api_secret = process.env.CLOUDINARY_API_SECRET;
+
+	if (!cloud_name || !api_key || !api_secret) {
+		throw new Error(
+			"Cloudinary credentials missing. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in your .env file.",
+		);
+	}
+
+	cloudinary.config({ cloud_name, api_key, api_secret });
+};
 
 export interface UploadResult {
 	public_id: string;
@@ -22,6 +30,7 @@ export const uploadToCloudinary = async (
 	userId: string,
 ): Promise<UploadResult> => {
 	try {
+		configureCloudinary();
 		return new Promise((resolve, reject) => {
 			const uploadStream = cloudinary.uploader.upload_stream(
 				{
@@ -60,7 +69,7 @@ export const uploadToCloudinary = async (
  */
 export const getFromCloudinary = async (publicId: string): Promise<Buffer> => {
 	try {
-		// For raw files, we need to fetch the URL and download the content
+		configureCloudinary();
 		const url = cloudinary.url(publicId, { resource_type: "raw" });
 
 		const response = await fetch(url);
@@ -81,6 +90,7 @@ export const getFromCloudinary = async (publicId: string): Promise<Buffer> => {
  */
 export const deleteFromCloudinary = async (publicId: string): Promise<void> => {
 	try {
+		configureCloudinary();
 		const result = await cloudinary.uploader.destroy(publicId, {
 			resource_type: "raw",
 		});
@@ -98,6 +108,7 @@ export const deleteFromCloudinary = async (publicId: string): Promise<void> => {
  * Generate secure URL for file access
  */
 export const getCloudinaryUrl = (publicId: string): string => {
+	configureCloudinary();
 	return cloudinary.url(publicId, {
 		resource_type: "raw",
 		secure: true,

@@ -134,8 +134,20 @@ export const analyzeResumeController = async (
 			`[Resume Analysis] Resume text length: ${resume.rawText.length}`,
 		);
 
-		// Analyze with AI
-		const analysis = await analyzeResume(resume.rawText);
+		let analysis;
+		try {
+			analysis = await analyzeResume(resume.rawText);
+		} catch (aiError: any) {
+			const msg = aiError?.message ?? "";
+			const isQuota =
+				msg.includes("quota") || msg.includes("429") || msg.includes("503");
+			throw new ApiError(
+				isQuota
+					? "AI quota exceeded. Please wait a few minutes and try again, or add billing to your Google AI account at https://ai.dev."
+					: "Failed to analyze resume. Please try again.",
+				503,
+			);
+		}
 
 		console.log(
 			`[Resume Analysis] Analysis completed with score: ${analysis.overallScore}`,

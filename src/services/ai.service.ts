@@ -1,19 +1,16 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-
-// Lazy initialization of Gemini client
-let gemini: GoogleGenerativeAI | null = null;
+import OpenAI from "openai";
 
 const getGeminiClient = (): GoogleGenerativeAI => {
-	if (!gemini) {
-		const apiKey = process.env.GEMINI_API_KEY;
-		if (!apiKey) {
-			throw new Error(
-				"Gemini API key is not configured. Please set GEMINI_API_KEY in your .env file.",
-			);
-		}
-		gemini = new GoogleGenerativeAI(apiKey);
-	}
-	return gemini;
+	const apiKey = process.env.GEMINI_API_KEY;
+	if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
+	return new GoogleGenerativeAI(apiKey);
+};
+
+const getOpenAIClient = (): OpenAI => {
+	const apiKey = process.env.OPENAI_API_KEY;
+	if (!apiKey) throw new Error("OPENAI_API_KEY not configured");
+	return new OpenAI({ apiKey });
 };
 
 const sanitizeJson = (value: string): string => {
@@ -161,130 +158,173 @@ export interface ResumeAnalysis {
 	};
 }
 
+const MODELS = [
+	"gemini-2.5-flash",
+	"gemini-2.0-flash",
+	"gemini-2.0-flash-lite",
+	"gemini-2.5-pro",
+];
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const getRetryDelay = (err: any): number | null => {
+	const details = err?.errorDetails as any[] | undefined;
+	if (!details) return null;
+	for (const detail of details) {
+		if (detail?.["@type"]?.includes("RetryInfo") && detail.retryDelay) {
+			const match = String(detail.retryDelay).match(/(\d+)/);
+			if (match) return parseInt(match[1], 10) * 1000;
+		}
+	}
+	return null;
+};
+
+const generateWithFallback = async (
+	prompt: string,
+	systemInstruction: string,
+	maxOutputTokens: number,
+): Promise<string> => {
+	let lastError: Error | null = null;
+
+	// --- Try Gemini models first ---
+	for (const modelName of MODELS) {
+		try {
+			const model = getGeminiClient().getGenerativeModel({
+				model: modelName,
+				systemInstruction,
+			});
+
+			const response = await model.generateContent({
+				contents: [{ role: "user", parts: [{ text: prompt }] }],
+				generationConfig: {
+					temperature: 0.3,
+					maxOutputTokens,
+					responseMimeType: "application/json",
+				},
+			});
+
+			const candidate = response.response.candidates?.[0];
+			if (candidate?.finishReason && candidate.finishReason !== "STOP") {
+				console.warn(
+					`[AI] Model ${modelName} finish reason: ${candidate.finishReason}`,
+				);
+			}
+
+			const content = response.response.text();
+			if (!content) throw new Error("Empty response from AI");
+
+			console.log(`[AI] Success with Gemini model: ${modelName}`);
+			return content;
+		} catch (err: any) {
+			lastError = err;
+			const status = err?.status ?? err?.statusCode;
+			if (status === 503 || status === 429 || status === 404) {
+				const retryDelay = getRetryDelay(err);
+				if (retryDelay && retryDelay <= 20000) {
+					console.warn(
+						`[AI] ${modelName} rate limited, waiting ${retryDelay}ms...`,
+					);
+					await sleep(retryDelay);
+				} else {
+					console.warn(
+						`[AI] ${modelName} unavailable (${status}), trying next...`,
+					);
+				}
+				continue;
+			}
+			// Non-quota error from Gemini — skip straight to OpenAI
+			console.warn(
+				`[AI] ${modelName} error (${status ?? err?.message}), falling back to OpenAI...`,
+			);
+			break;
+		}
+	}
+
+	// --- Fallback: OpenAI ---
+	const openaiKey = process.env.OPENAI_API_KEY;
+	if (openaiKey) {
+		try {
+			console.log("[AI] Trying OpenAI gpt-4o-mini...");
+			const openai = getOpenAIClient();
+			const completion = await openai.chat.completions.create({
+				model: "gpt-5.4",
+				messages: [
+					{ role: "system", content: systemInstruction },
+					{ role: "user", content: prompt },
+				],
+				temperature: 0.3,
+				max_tokens: maxOutputTokens,
+				response_format: { type: "json_object" },
+			});
+
+			const content = completion.choices[0]?.message?.content;
+			if (!content) throw new Error("Empty response from OpenAI");
+
+			console.log("[AI] Success with OpenAI gpt-4o-mini");
+			return content;
+		} catch (openaiErr: any) {
+			console.error("[AI] OpenAI also failed:", openaiErr?.message);
+			lastError = openaiErr;
+		}
+	} else {
+		console.warn(
+			"[AI] No OPENAI_API_KEY configured, cannot fall back to OpenAI",
+		);
+	}
+
+	throw lastError ?? new Error("All AI providers unavailable");
+};
+
 export const analyzeResume = async (
 	resumeText: string,
 ): Promise<ResumeAnalysis> => {
-	const prompt = `You are an expert resume analyst and career coach. Analyze this resume thoroughly and provide detailed, actionable feedback.
+	const prompt = `You are an expert resume analyst and career coach. Analyze this resume and return ONLY valid JSON.
 
 Resume:
 ${resumeText}
 
-Provide a comprehensive analysis in the following JSON format:
+Return this exact JSON structure:
 {
-  "overallScore": <number from 0-100 based on: formatting (20%), content quality (30%), keyword optimization (20%), experience presentation (30%)>,
-  "strengths": [
-    "<specific strength with example from resume>",
-    "<quantifiable achievement highlighted>",
-    "<strong skill or qualification>",
-    "Include 4-6 specific strengths"
-  ],
-  "improvements": [
-    "<specific section to improve with exact recommendation>",
-    "<missing element with suggestion on how to add it>",
-    "<formatting issue with fix>",
-    "<weak bullet point with stronger alternative>",
-    "Include 5-8 actionable improvements with specific examples"
-  ],
-  "keywords": [
-    "<industry-relevant keyword found or missing>",
-    "Include 10-15 important keywords for ATS optimization"
-  ],
-  "summary": "<2-3 sentence professional summary highlighting key qualifications, years of experience, and standout achievements>",
+  "overallScore": <number 0-100>,
+  "strengths": ["<strength 1>", "<strength 2>", "<strength 3>", "<strength 4>"],
+  "improvements": ["<improvement 1>", "<improvement 2>", "<improvement 3>", "<improvement 4>", "<improvement 5>"],
+  "keywords": ["<keyword 1>", "<keyword 2>", "<keyword 3>", "<keyword 4>", "<keyword 5>"],
+  "summary": "<2-3 sentence professional summary>",
   "parsedData": {
-    "name": "<full candidate name>",
-    "email": "<email if found>",
-    "phone": "<phone if found>",
-    "location": "<city, state/country if found>",
-    "summary": "<professional summary from resume if present>",
-    "skills": [
-      {"name": "<technical or soft skill>", "level": "<beginner|intermediate|advanced|expert based on context>"}
-    ],
-    "experience": [
-      {
-        "title": "<exact job title>",
-        "company": "<company name>",
-        "location": "<work location>",
-        "description": "<key responsibilities and achievements>"
-      }
-    ],
-    "education": [
-      {
-        "degree": "<degree type and major>",
-        "institution": "<university/college name>",
-        "location": "<institution location>"
-      }
-    ]
+    "name": "<full name>",
+    "email": "<email>",
+    "phone": "<phone>",
+    "location": "<city, country>",
+    "summary": "<summary from resume>",
+    "skills": [{"name": "<skill>", "level": "<beginner|intermediate|advanced|expert>"}],
+    "experience": [{"title": "<job title>", "company": "<company>", "location": "<location>", "description": "<responsibilities>"}],
+    "education": [{"degree": "<degree>", "institution": "<school>", "location": "<location>"}]
   }
 }
 
-SCORING CRITERIA:
-- 90-100: Exceptional resume with strong achievements, perfect formatting, ATS-optimized
-- 80-89: Strong resume with good content, minor improvements needed
-- 70-79: Good resume but needs better quantification and keyword optimization
-- 60-69: Average resume, needs significant improvements in content and structure
-- Below 60: Weak resume requiring major revisions
-
-IMPROVEMENT GUIDELINES:
-- Be specific: Instead of "improve formatting", say "Add consistent bullet points to all experience entries"
-- Provide examples: "Change 'Responsible for sales' to 'Increased sales by 35% through targeted marketing campaigns'"
-- Focus on impact: Highlight missing metrics, weak action verbs, and vague descriptions
-- ATS optimization: Identify missing industry keywords and suggest where to add them
-
-Return only valid JSON, no additional text.`;
+Score 90-100 for exceptional, 80-89 strong, 70-79 good, 60-69 average, below 60 needs major work.`;
 
 	try {
-		const model = getGeminiClient().getGenerativeModel({
-			model: "gemini-2.5-flash",
-			systemInstruction:
-				"You are an expert resume analyzer. Analyze resumes and provide structured feedback in JSON format.",
-		});
-
-		const response = await model.generateContent({
-			contents: [{ role: "user", parts: [{ text: prompt }] }],
-			generationConfig: {
-				temperature: 0.3,
-				maxOutputTokens: 12000,
-				responseMimeType: "application/json",
-			},
-		});
-
-		const candidate = response.response.candidates?.[0];
-		const finishReason = candidate?.finishReason;
-
-		if (finishReason && finishReason !== "STOP") {
-			console.warn(
-				`[Resume Analysis] Response truncated. Finish reason: ${finishReason}`,
-			);
-		}
-
-		const content = response.response.text();
-		if (!content) {
-			throw new Error("No response from AI");
-		}
+		const content = await generateWithFallback(
+			prompt,
+			"You are an expert resume analyzer. Analyze resumes and provide structured feedback in JSON format.",
+			12000,
+		);
 
 		console.log(
 			"[Resume Analysis] Raw AI response (first 500 chars):",
 			content.substring(0, 500),
 		);
-		console.log(
-			"[Resume Analysis] Response length:",
-			content.length,
-			"Finish reason:",
-			finishReason,
-		);
+		console.log("[Resume Analysis] Response length:", content.length);
 
 		try {
 			return parseJsonResponse<ResumeAnalysis>(content);
 		} catch (parseError) {
 			console.error("[Resume Analysis] Failed to parse JSON:", parseError);
-			console.error("[Resume Analysis] Full response:", content);
 			throw parseError;
 		}
 	} catch (error) {
 		console.error("AI Analysis Error:", error);
-
-		// Throw the error instead of returning empty analysis
-		// This will allow proper error handling in the controller
 		throw new Error(
 			`Resume analysis failed: ${error instanceof Error ? error.message : "Unknown error"}`,
 		);
@@ -379,66 +419,29 @@ ANALYSIS GUIDELINES:
 Return only valid JSON, no additional text.`;
 
 	try {
-		const model = getGeminiClient().getGenerativeModel({
-			model: "gemini-2.5-flash",
-			systemInstruction:
-				"You are an expert recruiter and resume matcher. Analyze how well candidates match job requirements.",
-		});
-
-		const response = await model.generateContent({
-			contents: [{ role: "user", parts: [{ text: prompt }] }],
-			generationConfig: {
-				temperature: 0.3,
-				maxOutputTokens: 8000,
-				responseMimeType: "application/json",
-			},
-		});
-
-		const candidate = response.response.candidates?.[0];
-		const finishReason = candidate?.finishReason;
-
-		if (finishReason && finishReason !== "STOP") {
-			console.warn(
-				`[Job Match] Response truncated. Finish reason: ${finishReason}`,
-			);
-		}
-
-		const content = response.response.text();
-		if (!content) {
-			throw new Error("No response from AI");
-		}
+		const content = await generateWithFallback(
+			prompt,
+			"You are an expert recruiter and resume matcher. Analyze how well candidates match job requirements.",
+			8000,
+		);
 
 		console.log(
 			"[Job Match] Raw AI response (first 500 chars):",
 			content.substring(0, 500),
-		);
-		console.log(
-			"[Job Match] Response length:",
-			content.length,
-			"Finish reason:",
-			finishReason,
 		);
 
 		try {
 			return parseJsonResponse<JobMatchAnalysis>(content);
 		} catch (parseError) {
 			console.error("[Job Match] Failed to parse JSON:", parseError);
-			console.error("[Job Match] Full response:", content);
 			throw parseError;
 		}
 	} catch (error) {
 		console.error("Job Match Analysis Error:", error);
 		return {
 			matchScore: 0,
-			skillsMatch: {
-				matched: [],
-				missing: jobSkills,
-				percentage: 0,
-			},
-			experienceMatch: {
-				score: 0,
-				feedback: "Unable to analyze at this time",
-			},
+			skillsMatch: { matched: [], missing: jobSkills, percentage: 0 },
+			experienceMatch: { score: 0, feedback: "Unable to analyze at this time" },
 			recommendations: ["Please try again later"],
 			analysis: "Analysis unavailable",
 		};
@@ -506,23 +509,11 @@ GUIDELINES:
 Return only valid JSON, no additional text.`;
 
 	try {
-		const model = getGeminiClient().getGenerativeModel({
-			model: "gemini-2.5-flash",
-			systemInstruction:
-				"You are an expert resume coach. Provide specific, actionable improvements.",
-		});
-
-		const response = await model.generateContent({
-			contents: [{ role: "user", parts: [{ text: prompt }] }],
-			generationConfig: {
-				temperature: 0.4,
-				maxOutputTokens: 8000,
-				responseMimeType: "application/json",
-			},
-		});
-
-		const content = response.response.text();
-		if (!content) throw new Error("No response from AI");
+		const content = await generateWithFallback(
+			prompt,
+			"You are an expert resume coach. Provide specific, actionable improvements.",
+			8000,
+		);
 
 		return parseJsonResponse<ImprovementResult>(content);
 	} catch (error) {
