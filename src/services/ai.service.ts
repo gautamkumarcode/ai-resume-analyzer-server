@@ -282,19 +282,12 @@ Return only valid JSON, no additional text.`;
 		}
 	} catch (error) {
 		console.error("AI Analysis Error:", error);
-		// Return default analysis if AI fails
-		return {
-			overallScore: 0,
-			strengths: [],
-			improvements: ["Unable to analyze resume at this time"],
-			keywords: [],
-			summary: "Analysis unavailable",
-			parsedData: {
-				skills: [],
-				experience: [],
-				education: [],
-			},
-		};
+
+		// Throw the error instead of returning empty analysis
+		// This will allow proper error handling in the controller
+		throw new Error(
+			`Resume analysis failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+		);
 	}
 };
 

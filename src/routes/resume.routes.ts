@@ -14,6 +14,19 @@ const router = Router();
 
 router.use(protect);
 
+// Test endpoint for AI service
+router.get("/test-ai", requireRole("candidate"), async (req, res, next) => {
+	try {
+		const testText =
+			"John Doe\nSoftware Engineer\nExperience: 5 years in React, Node.js, Python\nEducation: BS Computer Science";
+		const { analyzeResume } = await import("../services/ai.service");
+		const result = await analyzeResume(testText);
+		res.json({ success: true, data: result });
+	} catch (error) {
+		next(error);
+	}
+});
+
 // Candidates only — upload, analyze, manage their own resumes
 router.post(
 	"/upload",

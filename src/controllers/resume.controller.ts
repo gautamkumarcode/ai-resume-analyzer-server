@@ -21,11 +21,20 @@ export const uploadResume = async (
 
 		const userId = req.user!._id.toString();
 
+		console.log(`[Resume Upload] Starting upload for user ${userId}`);
+		console.log(
+			`[Resume Upload] File: ${req.file.originalname}, Size: ${req.file.size}`,
+		);
+
 		// Upload to Cloudinary
 		const uploadResult = await uploadToCloudinary(
 			req.file.buffer,
 			req.file.originalname,
 			userId,
+		);
+
+		console.log(
+			`[Resume Upload] File uploaded to Cloudinary: ${uploadResult.public_id}`,
 		);
 
 		// Parse resume text from buffer
@@ -34,24 +43,43 @@ export const uploadResume = async (
 			req.file.mimetype,
 		);
 
-		// Analyze with AI on upload
-		const analysis = await analyzeResume(rawText);
+		console.log(`[Resume Upload] Text parsed, length: ${rawText.length}`);
 
-		// Create resume record with analysis
+		// Create resume record first without analysis
 		const resume = await Resume.create({
 			user: userId,
 			fileName: req.file.originalname,
 			filePath: uploadResult.public_id, // Store Cloudinary public_id
 			fileType: req.file.mimetype,
 			rawText,
-			aiAnalysis: {
+			parsedData: {
+				skills: [],
+				experience: [],
+				education: [],
+			},
+		});
+
+		console.log(`[Resume Upload] Resume record created: ${resume._id}`);
+
+		// Try to analyze with AI, but don't fail upload if analysis fails
+		try {
+			console.log(`[Resume Upload] Starting AI analysis`);
+			const analysis = await analyzeResume(rawText);
+
+			console.log(
+				`[Resume Upload] AI analysis completed with score: ${analysis.overallScore}`,
+			);
+
+			// Update resume with analysis
+			resume.aiAnalysis = {
 				overallScore: analysis.overallScore,
 				strengths: analysis.strengths,
 				improvements: analysis.improvements,
 				keywords: analysis.keywords,
 				summary: analysis.summary,
-			},
-			parsedData: {
+			};
+
+			resume.parsedData = {
 				name: analysis.parsedData.name,
 				email: analysis.parsedData.email,
 				phone: analysis.parsedData.phone,
@@ -63,14 +91,21 @@ export const uploadResume = async (
 				})),
 				experience: analysis.parsedData.experience,
 				education: analysis.parsedData.education,
-			},
-		});
+			};
+
+			await resume.save();
+			console.log(`[Resume Upload] Resume updated with AI analysis`);
+		} catch (analysisError) {
+			console.error(`[Resume Upload] AI analysis failed:`, analysisError);
+			// Continue without analysis - user can analyze later
+		}
 
 		res.status(201).json({
 			success: true,
 			data: { resume },
 		});
 	} catch (error) {
+		console.error(`[Resume Upload] Error:`, error);
 		next(error);
 	}
 };
@@ -89,8 +124,22 @@ export const analyzeResumeController = async (
 			throw new ApiError("Resume not found", 404);
 		}
 
+		// Check if resume has text to analyze
+		if (!resume.rawText || resume.rawText.trim().length === 0) {
+			throw new ApiError("Resume text not available for analysis", 400);
+		}
+
+		console.log(`[Resume Analysis] Starting analysis for resume ${id}`);
+		console.log(
+			`[Resume Analysis] Resume text length: ${resume.rawText.length}`,
+		);
+
 		// Analyze with AI
 		const analysis = await analyzeResume(resume.rawText);
+
+		console.log(
+			`[Resume Analysis] Analysis completed with score: ${analysis.overallScore}`,
+		);
 
 		// Update resume with analysis
 		resume.aiAnalysis = {
@@ -117,6 +166,7 @@ export const analyzeResumeController = async (
 			data: { resume },
 		});
 	} catch (error) {
+		console.error(`[Resume Analysis] Error:`, error);
 		next(error);
 	}
 };
