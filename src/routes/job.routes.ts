@@ -10,6 +10,7 @@ import {
 	getJobs,
 	getRecommendedJobs,
 	matchResumeToJob,
+	updateInterviewQuestions,
 	updateJob,
 } from "../controllers/job.controller";
 import { protect, requireRole } from "../middleware/auth";
@@ -117,6 +118,16 @@ router.get(
 	param("id").isMongoId().withMessage("Invalid job ID"),
 	validate,
 	getJobApplications,
+);
+
+// ── Interview questions (recruiters only) ──────────────────────────────────
+router.put(
+	"/:id/interview-questions",
+	requireRole("recruiter"),
+	param("id").isMongoId().withMessage("Invalid job ID"),
+	body("questions").isArray().withMessage("questions must be an array"),
+	validate,
+	updateInterviewQuestions,
 );
 
 export default router;

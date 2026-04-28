@@ -159,7 +159,7 @@ export interface ResumeAnalysis {
 }
 
 const MODELS = [
-	"gemini-2.5-flash",
+	"gemini-3.0-flash",
 	"gemini-2.0-flash",
 	"gemini-2.0-flash-lite",
 	"gemini-2.5-pro",
@@ -533,33 +533,100 @@ export interface InterviewQuestion {
 	category: "technical" | "behavioral" | "situational" | "role-specific";
 }
 
+const FALLBACK_QUESTIONS: InterviewQuestion[] = [
+	{
+		question: "Tell me about your most recent project and your role in it.",
+		category: "role-specific",
+	},
+	{
+		question:
+			"What is your strongest technical skill and how have you applied it?",
+		category: "technical",
+	},
+	{
+		question: "Describe a time you solved a difficult problem under pressure.",
+		category: "behavioral",
+	},
+	{
+		question: "How do you approach learning a new technology or framework?",
+		category: "situational",
+	},
+	{
+		question: "Where do you see yourself growing technically in the next year?",
+		category: "role-specific",
+	},
+];
+
 export const generateInterviewQuestions = async (
 	jobTitle: string,
 	jobDescription: string,
 	resumeText: string,
 	count = 5,
 ): Promise<InterviewQuestion[]> => {
-	const prompt = `You are an expert technical interviewer. Generate exactly ${count} concise interview questions.
+	// Ask for questions one per line to avoid JSON truncation
+	const prompt = `Generate exactly ${count} short interview questions for a ${jobTitle} candidate.
+Job focus: ${jobDescription.slice(0, 300)}
+Candidate background: ${resumeText.slice(0, 300)}
 
-Job Title: ${jobTitle}
-Job Description (summary): ${jobDescription.slice(0, 500)}
+Output format — one question per line, prefixed with category:
+technical: <question under 20 words>
+behavioral: <question under 20 words>
+situational: <question under 20 words>
+role-specific: <question under 20 words>
+technical: <question under 20 words>
 
-Candidate Skills (from resume): ${resumeText.slice(0, 400)}
+Output ONLY the 5 lines above, nothing else.`;
 
-Rules:
-- Each question must be under 30 words
-- Mix: 2 technical, 1 behavioral, 1 situational, 1 role-specific
-- Be direct and specific
+	try {
+		const content = await generateWithFallback(
+			prompt,
+			"You are an expert interviewer. Output exactly 5 lines in the requested format.",
+			400,
+		);
 
-Return ONLY a valid JSON array, nothing else:
-[{"question":"<short question>","category":"technical"},{"question":"<short question>","category":"behavioral"},{"question":"<short question>","category":"situational"},{"question":"<short question>","category":"role-specific"},{"question":"<short question>","category":"technical"}]`;
+		// Parse "category: question" lines
+		const lines = content
+			.trim()
+			.split("\n")
+			.filter((l) => l.includes(":"));
+		const questions: InterviewQuestion[] = [];
 
-	const content = await generateWithFallback(
-		prompt,
-		"You are an expert interviewer. Generate targeted interview questions as a JSON array. Return ONLY valid JSON.",
-		1000,
-	);
-	return parseJsonResponse<InterviewQuestion[]>(content);
+		for (const line of lines) {
+			const colonIdx = line.indexOf(":");
+			if (colonIdx === -1) continue;
+			const cat = line.slice(0, colonIdx).trim().toLowerCase();
+			const q = line.slice(colonIdx + 1).trim();
+			if (!q) continue;
+			const validCats = [
+				"technical",
+				"behavioral",
+				"situational",
+				"role-specific",
+			];
+			questions.push({
+				question: q,
+				category: (validCats.includes(cat)
+					? cat
+					: "technical") as InterviewQuestion["category"],
+			});
+			if (questions.length >= count) break;
+		}
+
+		// Pad with fallbacks if we didn't get enough
+		while (questions.length < count) {
+			questions.push(
+				FALLBACK_QUESTIONS[questions.length % FALLBACK_QUESTIONS.length],
+			);
+		}
+
+		return questions;
+	} catch (err) {
+		console.warn(
+			"[Interview] AI question generation failed, using fallback questions:",
+			err,
+		);
+		return FALLBACK_QUESTIONS.slice(0, count);
+	}
 };
 
 export interface InterviewEvaluation {
@@ -613,4 +680,13 @@ Return only valid JSON.`;
 		3000,
 	);
 	return parseJsonResponse<InterviewEvaluation>(content);
+};
+
+// Exported wrapper for conversational chat turns
+export const chatWithAI = async (
+	prompt: string,
+	systemInstruction: string,
+	maxTokens = 300,
+): Promise<string> => {
+	return generateWithFallback(prompt, systemInstruction, maxTokens);
 };

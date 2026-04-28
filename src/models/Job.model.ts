@@ -15,6 +15,7 @@ export interface IJob extends Document {
 		max?: number;
 		currency?: string;
 	};
+	interviewQuestions: string[]; // recruiter-defined questions
 	createdAt: Date;
 	updatedAt: Date;
 }
@@ -67,6 +68,7 @@ const jobSchema = new Schema<IJob>(
 				default: "USD",
 			},
 		},
+		interviewQuestions: [{ type: String }],
 	},
 	{
 		timestamps: true,

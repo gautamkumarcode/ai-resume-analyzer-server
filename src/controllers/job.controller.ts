@@ -343,3 +343,31 @@ export const getRecommendedJobs = async (
 		next(error);
 	}
 };
+
+export const updateInterviewQuestions = async (
+	req: AuthRequest,
+	res: Response,
+	next: NextFunction,
+): Promise<void> => {
+	try {
+		const { id } = req.params;
+		const { questions } = req.body as { questions: string[] };
+		const userId = req.user!._id;
+
+		if (!Array.isArray(questions)) {
+			throw new ApiError("questions must be an array of strings", 400);
+		}
+
+		const job = await Job.findOneAndUpdate(
+			{ _id: id, user: userId },
+			{ interviewQuestions: questions.filter((q) => q.trim()) },
+			{ new: true },
+		);
+
+		if (!job) throw new ApiError("Job not found", 404);
+
+		res.json({ success: true, data: { job } });
+	} catch (error) {
+		next(error);
+	}
+};
