@@ -6,6 +6,7 @@ import { errorHandler } from "./middleware/errorHandler";
 import adminRoutes from "./routes/admin.routes";
 import applicationRoutes from "./routes/application.routes";
 import authRoutes from "./routes/auth.routes";
+import interviewRoutes from "./routes/interview.routes";
 import jobRoutes from "./routes/job.routes";
 import resumeRoutes from "./routes/resume.routes";
 
@@ -46,6 +47,7 @@ app.use("/api/resumes", resumeRoutes);
 app.use("/api/jobs", jobRoutes);
 app.use("/api/applications", applicationRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/interviews", interviewRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {

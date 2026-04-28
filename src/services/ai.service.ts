@@ -527,3 +527,90 @@ Return only valid JSON, no additional text.`;
 		};
 	}
 };
+
+export interface InterviewQuestion {
+	question: string;
+	category: "technical" | "behavioral" | "situational" | "role-specific";
+}
+
+export const generateInterviewQuestions = async (
+	jobTitle: string,
+	jobDescription: string,
+	resumeText: string,
+	count = 5,
+): Promise<InterviewQuestion[]> => {
+	const prompt = `You are an expert technical interviewer. Generate exactly ${count} concise interview questions.
+
+Job Title: ${jobTitle}
+Job Description (summary): ${jobDescription.slice(0, 500)}
+
+Candidate Skills (from resume): ${resumeText.slice(0, 400)}
+
+Rules:
+- Each question must be under 30 words
+- Mix: 2 technical, 1 behavioral, 1 situational, 1 role-specific
+- Be direct and specific
+
+Return ONLY a valid JSON array, nothing else:
+[{"question":"<short question>","category":"technical"},{"question":"<short question>","category":"behavioral"},{"question":"<short question>","category":"situational"},{"question":"<short question>","category":"role-specific"},{"question":"<short question>","category":"technical"}]`;
+
+	const content = await generateWithFallback(
+		prompt,
+		"You are an expert interviewer. Generate targeted interview questions as a JSON array. Return ONLY valid JSON.",
+		1000,
+	);
+	return parseJsonResponse<InterviewQuestion[]>(content);
+};
+
+export interface InterviewEvaluation {
+	overallScore: number;
+	fitLevel: "excellent" | "good" | "average" | "poor";
+	summary: string;
+	strengths: string[];
+	concerns: string[];
+	answerEvaluations: { score: number; feedback: string }[];
+}
+
+export const evaluateInterview = async (
+	jobTitle: string,
+	jobDescription: string,
+	qaPairs: { question: string; answer: string }[],
+): Promise<InterviewEvaluation> => {
+	const qaText = qaPairs
+		.map(
+			(qa, i) =>
+				`Q${i + 1}: ${qa.question}\nA${i + 1}: ${qa.answer || "(no answer provided)"}`,
+		)
+		.join("\n\n");
+
+	const prompt = `You are an expert hiring manager. Evaluate this candidate's interview for the role.
+
+Job Title: ${jobTitle}
+Job Description: ${jobDescription}
+
+Interview Q&A:
+${qaText}
+
+Evaluate and return JSON:
+{
+  "overallScore": <0-100>,
+  "fitLevel": "excellent|good|average|poor",
+  "summary": "<2-3 sentence overall assessment>",
+  "strengths": ["<strength 1>", "<strength 2>", "<strength 3>"],
+  "concerns": ["<concern 1>", "<concern 2>"],
+  "answerEvaluations": [
+    {"score": <0-10>, "feedback": "<specific feedback on this answer>"},
+    ...one per answer in order...
+  ]
+}
+
+Scoring: 85-100 excellent, 70-84 good, 50-69 average, below 50 poor.
+Return only valid JSON.`;
+
+	const content = await generateWithFallback(
+		prompt,
+		"You are an expert hiring manager evaluating interview responses.",
+		3000,
+	);
+	return parseJsonResponse<InterviewEvaluation>(content);
+};
