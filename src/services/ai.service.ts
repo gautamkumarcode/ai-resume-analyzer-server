@@ -1,10 +1,14 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import OpenAI from "openai";
 
-const getGeminiClient = (): GoogleGenerativeAI => {
-	const apiKey = process.env.GEMINI_API_KEY;
-	if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
-	return new GoogleGenerativeAI(apiKey);
+// Support multiple Gemini API keys (comma-separated) for quota rotation
+const getGeminiClients = (): GoogleGenerativeAI[] => {
+	const keys = (process.env.GEMINI_API_KEY ?? "")
+		.split(",")
+		.map((k) => k.trim())
+		.filter(Boolean);
+	if (keys.length === 0) throw new Error("GEMINI_API_KEY not configured");
+	return keys.map((k) => new GoogleGenerativeAI(k));
 };
 
 const getOpenAIClient = (): OpenAI => {
@@ -159,7 +163,7 @@ export interface ResumeAnalysis {
 }
 
 const MODELS = [
-	"gemini-3.0-flash",
+	"gemini-2.5-flash",
 	"gemini-2.0-flash",
 	"gemini-2.0-flash-lite",
 	"gemini-2.5-pro",
@@ -186,57 +190,61 @@ const generateWithFallback = async (
 ): Promise<string> => {
 	let lastError: Error | null = null;
 
-	// --- Try Gemini models first ---
+	// --- Try each Gemini key × each model ---
+	const clients = getGeminiClients();
 	for (const modelName of MODELS) {
-		try {
-			const model = getGeminiClient().getGenerativeModel({
-				model: modelName,
-				systemInstruction,
-			});
+		for (let ki = 0; ki < clients.length; ki++) {
+			const keyLabel = clients.length > 1 ? ` (key ${ki + 1})` : "";
+			try {
+				const model = clients[ki].getGenerativeModel({
+					model: modelName,
+					systemInstruction,
+				});
 
-			const response = await model.generateContent({
-				contents: [{ role: "user", parts: [{ text: prompt }] }],
-				generationConfig: {
-					temperature: 0.3,
-					maxOutputTokens,
-					responseMimeType: "application/json",
-				},
-			});
+				const response = await model.generateContent({
+					contents: [{ role: "user", parts: [{ text: prompt }] }],
+					generationConfig: {
+						temperature: 0.3,
+						maxOutputTokens,
+						responseMimeType: "application/json",
+					},
+				});
 
-			const candidate = response.response.candidates?.[0];
-			if (candidate?.finishReason && candidate.finishReason !== "STOP") {
-				console.warn(
-					`[AI] Model ${modelName} finish reason: ${candidate.finishReason}`,
-				);
-			}
-
-			const content = response.response.text();
-			if (!content) throw new Error("Empty response from AI");
-
-			console.log(`[AI] Success with Gemini model: ${modelName}`);
-			return content;
-		} catch (err: any) {
-			lastError = err;
-			const status = err?.status ?? err?.statusCode;
-			if (status === 503 || status === 429 || status === 404) {
-				const retryDelay = getRetryDelay(err);
-				if (retryDelay && retryDelay <= 20000) {
+				const candidate = response.response.candidates?.[0];
+				if (candidate?.finishReason && candidate.finishReason !== "STOP") {
 					console.warn(
-						`[AI] ${modelName} rate limited, waiting ${retryDelay}ms...`,
-					);
-					await sleep(retryDelay);
-				} else {
-					console.warn(
-						`[AI] ${modelName} unavailable (${status}), trying next...`,
+						`[AI] ${modelName}${keyLabel} finish reason: ${candidate.finishReason}`,
 					);
 				}
-				continue;
+
+				const content = response.response.text();
+				if (!content) throw new Error("Empty response from AI");
+
+				console.log(`[AI] Success with Gemini model: ${modelName}${keyLabel}`);
+				return content;
+			} catch (err: any) {
+				lastError = err;
+				const status = err?.status ?? err?.statusCode;
+				if (status === 503 || status === 429 || status === 404) {
+					const retryDelay = getRetryDelay(err);
+					if (retryDelay && retryDelay <= 20000) {
+						console.warn(
+							`[AI] ${modelName}${keyLabel} rate limited, waiting ${retryDelay}ms...`,
+						);
+						await sleep(retryDelay);
+					} else {
+						console.warn(
+							`[AI] ${modelName}${keyLabel} unavailable (${status}), trying next...`,
+						);
+					}
+					continue;
+				}
+				// Non-quota error — skip to next model
+				console.warn(
+					`[AI] ${modelName}${keyLabel} error (${status ?? err?.message}), trying next...`,
+				);
+				break;
 			}
-			// Non-quota error from Gemini — skip straight to OpenAI
-			console.warn(
-				`[AI] ${modelName} error (${status ?? err?.message}), falling back to OpenAI...`,
-			);
-			break;
 		}
 	}
 
