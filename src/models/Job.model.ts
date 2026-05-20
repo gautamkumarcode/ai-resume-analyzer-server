@@ -16,6 +16,8 @@ export interface IJob extends Document {
 		currency?: string;
 	};
 	interviewQuestions: string[]; // recruiter-defined questions
+	externalSource?: string;
+	externalId?: string;
 	createdAt: Date;
 	updatedAt: Date;
 }
@@ -55,6 +57,16 @@ const jobSchema = new Schema<IJob>(
 				type: String,
 			},
 		],
+		externalSource: {
+			type: String,
+			trim: true,
+			index: true,
+		},
+		externalId: {
+			type: String,
+			trim: true,
+			index: true,
+		},
 		skills: [
 			{
 				type: String,

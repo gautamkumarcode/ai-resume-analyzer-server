@@ -11,8 +11,10 @@
 		"seed:jobs": "ts-node src/scripts/seedJobs.ts"
 	},
 	"dependencies": {
+		"jsdom": "^22.1.0",
 		"@google/generative-ai": "^0.24.1",
 		"bcryptjs": "^2.4.3",
+		"bullmq": "^5.5.2",
 		"cloudinary": "^1.41.3",
 		"cors": "^2.8.5",
 		"dotenv": "^16.3.1",
@@ -23,7 +25,9 @@
 		"mongoose": "^8.0.3",
 		"multer": "^1.4.5-lts.1",
 		"openai": "^4.24.1",
-		"pdf-parse": "^1.1.1"
+		"pdf-parse": "^1.1.1",
+		"playwright": "^1.40.1",
+		"redis": "^4.6.12"
 	},
 	"devDependencies": {
 		"@types/bcryptjs": "^2.4.6",
